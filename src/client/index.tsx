@@ -7,15 +7,20 @@ import {
   Route,
   Navigate,
   useParams,
+  useLocation,
 } from "react-router";
 import { nanoid } from "nanoid";
 
-import { names, type ChatMessage, type Message } from "../shared";
+import { names, type ChatMessage, type Message, UserType } from "../shared";
 
 function App() {
   const [name] = useState(names[Math.floor(Math.random() * names.length)]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const { room } = useParams();
+  const location = useLocation();
+  const [userType, setUserType] = useState<UserType>(
+    location.pathname.includes("/agent") ? UserType.AGENT : UserType.CUSTOMER,
+  );
 
   const socket = usePartySocket({
     party: "chat",
@@ -33,6 +38,7 @@ function App() {
               content: message.content,
               user: message.user,
               role: message.role,
+              userType: message.userType,
             },
           ]);
         } else {
@@ -47,6 +53,7 @@ function App() {
                 content: message.content,
                 user: message.user,
                 role: message.role,
+                userType: message.userType,
               })
               .concat(messages.slice(foundIndex + 1));
           });
@@ -60,6 +67,7 @@ function App() {
                   content: message.content,
                   user: message.user,
                   role: message.role,
+                  userType: message.userType,
                 }
               : m,
           ),
@@ -72,6 +80,7 @@ function App() {
 
   return (
     <div className="chat container">
+      <div>Role: {userType}</div>
       {messages.map((message) => (
         <div key={message.id} className="row message">
           <div className="two columns user">{message.user}</div>
@@ -90,6 +99,7 @@ function App() {
             content: content.value,
             user: name,
             role: "user",
+            userType: userType,
           };
           setMessages((messages) => [...messages, chatMessage]);
           // we could broadcast the message here
@@ -125,6 +135,7 @@ createRoot(document.getElementById("root")!).render(
     <Routes>
       <Route path="/" element={<Navigate to={`/${nanoid()}`} />} />
       <Route path="/:room" element={<App />} />
+      <Route path="/:room/agent" element={<App />} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   </BrowserRouter>,
