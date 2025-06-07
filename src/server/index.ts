@@ -9,11 +9,19 @@ import type { ChatMessage, Message } from "../shared";
 
 export class Chat extends Server<Env> {
   static options = { hibernate: true };
+  private adminDOStub: DurableObjectStub;
 
   messages = [] as ChatMessage[];
   customerQueue: string[] = [];
   availableAgents: string[] = [];
-  activeConversations: Map<string, string> = new Map(); // customerId -> agentId
+  activeConversations: Map<string, string> = new Map(); // customerId (connection.id) -> agentId (nanoid)
+
+  constructor(state: DurableObjectState, env: Env) {
+    super(state, env); // Call the parent Server constructor
+    const doId = env.ADMIN_STATE_DO.idFromName("admin_singleton_id");
+    this.adminDOStub = env.ADMIN_STATE_DO.get(doId);
+    console.log("Chat DO: AdminStateDO stub initialized.");
+  }
 
   broadcastMessage(message: Message, exclude?: string[]) {
     console.log(`Broadcasting message: ${message.type}`, message);
@@ -150,40 +158,74 @@ export class Chat extends Server<Env> {
     }
   }
 
-  onConnect(connection: Connection) {
-    const userId = connection.id;
-    const isAgent = connection.uri.includes("/agent/");
-    const userType = isAgent ? "agent" : "customer";
-    console.log(`onConnect: User connected. ID: ${userId}, Type: ${userType}, URI: ${connection.uri}`);
+  async onConnect(connection: Connection) {
+    const-partykit ConnectionContext is not available here, using connection.request.url
+    const url = new URL(connection.request.url);
+    const pathSegments = url.pathname.split("/").filter(segment => segment.length > 0);
+    // Example agent URL structure: ws://host/room_name/agent/agent_nanoid_key
+    // pathSegments might be: ["room_name", "agent", "agent_nanoid_key"]
 
-    if (isAgent) {
-      this.makeAgentAvailable(userId);
-    } else { // Customer
-      console.log(`Customer ${userId} connecting. Available agents: ${this.availableAgents.length}`);
-      if (this.availableAgents.length > 0) {
-        const agentId = this.availableAgents.shift(); // Take agent from front
-        if (agentId) {
-            this.makeAgentUnavailable(agentId); // Mark as busy
-            this.activeConversations.set(userId, agentId);
-            console.log(`IMMEDIATE ASSIGNMENT: Agent ${agentId} to Customer ${userId}. ActiveConvos: ${this.activeConversations.size}, AvailAgents: [${this.availableAgents.join(", ")}]`);
-            const assignmentMessage: Message = { type: "agent_assigned", customerId: userId, agentId };
-            this.sendToConnection(userId, assignmentMessage);
-            this.sendToConnection(agentId, assignmentMessage);
+    let isPotentialAgent = false;
+    let agentKeyFromUrl: string | undefined;
+
+    if (pathSegments.length >= 2 && pathSegments[pathSegments.length - 2].toLowerCase() === "agent") {
+      agentKeyFromUrl = pathSegments[pathSegments.length - 1];
+      isPotentialAgent = true;
+      console.log(`Chat DO: Potential agent connection from ${connection.id} with key ${agentKeyFromUrl} for room ${pathSegments[0]}`);
+    }
+
+    if (isPotentialAgent && agentKeyFromUrl) {
+      try {
+        // Use a unique URL for DO-to-DO communication to avoid potential routing conflicts
+        const validationRequestUrl = `http://internal-do-communication/_internal/validate_agent_key/${agentKeyFromUrl}`;
+        const validationResponse = await this.adminDOStub.fetch(new Request(validationRequestUrl));
+
+        if (validationResponse.ok) {
+          const agentData = await validationResponse.json<{ seatId: number; agentId: string }>();
+          console.log(`Chat DO: AGENT AUTH SUCCESS - Key ${agentKeyFromUrl} validated for agentId (nanoid): ${agentData.agentId} (Seat ${agentData.seatId}). Connection ID: ${connection.id}`);
+
+          connection.state = { agentId: agentData.agentId, userType: "agent" };
+          this.makeAgentAvailable(agentData.agentId);
+
         } else {
-            // This case should ideally not be reached if availableAgents.length > 0 was true
-            console.error(`Error in onConnect: availableAgents.length > 0 but shift() returned undefined. Enqueuing customer ${userId}.`);
-            this.enqueueCustomer(userId);
-            this.sendToConnection(userId, { type: "no_agents_available" } satisfies Message);
+          const errorText = await validationResponse.text();
+          console.warn(`Chat DO: AGENT AUTH FAILED - Key ${agentKeyFromUrl} invalid. Reason: ${validationResponse.status} ${errorText}. Closing connection ${connection.id}.`);
+          connection.close(1008, "Invalid or expired agent key");
+          return;
+        }
+      } catch (e: any) {
+        console.error(`Chat DO: AGENT AUTH ERROR - Error validating agent key ${agentKeyFromUrl}. Error: ${e.message}. Closing connection ${connection.id}.`);
+        connection.close(1011, "Error during agent authentication");
+        return;
+      }
+    } else { // Customer connection
+      const customerId = connection.id; // Use connection.id as customerId
+      // PartyKit specific: connection.setState({ userType: "customer", connectionId: customerId });
+      connection.state = { userType: "customer" };
+      console.log(`Chat DO: Customer connected. ID: ${customerId}, Room: ${pathSegments[0] || 'default'}`);
+      if (this.availableAgents.length > 0) {
+        const agentIdToAssign = this.availableAgents.shift(); // agentIdToAssign is a nanoid
+        if (agentIdToAssign) {
+            this.makeAgentUnavailable(agentIdToAssign);
+            this.activeConversations.set(customerId, agentIdToAssign); // Map customer's connection.id to agent's nanoid
+            console.log(`IMMEDIATE ASSIGNMENT (Customer ${customerId}): Agent ${agentIdToAssign}. ActiveConvos: ${this.activeConversations.size}, AvailAgents: [${this.availableAgents.join(", ")}]`);
+            const assignmentMessage: Message = { type: "agent_assigned", customerId: customerId, agentId: agentIdToAssign };
+            this.sendToConnection(customerId, assignmentMessage);
+            this.sendToConnection(agentIdToAssign, assignmentMessage); // Need a way to send to agent by their nanoid
+        } else {
+            console.error(`Chat DO: Error in onConnect (Customer ${customerId}): availableAgents.length > 0 but shift() returned undefined. Enqueuing customer.`);
+            this.enqueueCustomer(customerId);
+            this.sendToConnection(customerId, { type: "no_agents_available" } satisfies Message);
         }
       } else {
-        console.log(`No agents available for customer ${userId}. Enqueuing.`);
-        this.enqueueCustomer(userId);
-        this.sendToConnection(userId, { type: "no_agents_available" } satisfies Message);
+        console.log(`Chat DO: No agents available for customer ${customerId}. Enqueuing.`);
+        this.enqueueCustomer(customerId);
+        this.sendToConnection(customerId, { type: "no_agents_available" } satisfies Message);
       }
     }
 
-    // Send existing messages to the newly connected user
-    console.log(`Sending existing messages to ${userId}. Count: ${this.messages.length}`);
+    // Send existing messages to the newly connected user (both agent and customer)
+    console.log(`Chat DO: Sending existing messages to ${connection.id}. Count: ${this.messages.length}`);
     connection.send(
       JSON.stringify({
         type: "all",
@@ -192,49 +234,51 @@ export class Chat extends Server<Env> {
     );
   }
 
-  onClose(connection: Connection) {
-    const userId = connection.id;
-    const isAgent = connection.uri.includes("/agent/");
-    const userType = isAgent ? "agent" : "customer";
-    console.log(`onClose: User disconnected. ID: ${userId}, Type: ${userType}`);
+  async onClose(connection: Connection) {
+    const disconnectedUserId = connection.id; // This is the connection.id
+    const state = connection.state as { agentId?: string; userType?: string } | undefined;
 
-    if (isAgent) {
-      this.makeAgentUnavailable(userId);
-      // If agent was in a conversation, notify the customer and manage customer state
-      let customerToNotify: string | null = null;
-      for (const [customerId, agentId] of this.activeConversations.entries()) {
-        if (agentId === userId) {
-          customerToNotify = customerId;
+    console.log(`Chat DO: onClose - User disconnected. Connection ID: ${disconnectedUserId}, Stored State:`, state);
+
+    if (state?.userType === "agent" && state.agentId) {
+      const agentNanoId = state.agentId; // This is the nanoid
+      console.log(`Chat DO: Agent ${agentNanoId} (Conn ID: ${disconnectedUserId}) disconnected.`);
+      this.makeAgentUnavailable(agentNanoId);
+
+      let customerToNotifyConnectionId: string | null = null;
+      // Iterate over activeConversations to find if this agent (nanoid) was mapped
+      for (const [customerConnId, assignedAgentNanoId] of this.activeConversations.entries()) {
+        if (assignedAgentNanoId === agentNanoId) {
+          customerToNotifyConnectionId = customerConnId;
           break;
         }
       }
-      if (customerToNotify) {
-        console.log(`Agent ${userId} disconnected from active conversation with customer ${customerToNotify}.`);
-        this.activeConversations.delete(customerToNotify);
-        // Decide what to do with the customer: re-queue, send message, etc.
-        // For now, just log and perhaps send a message to customer.
-        this.sendToConnection(customerToNotify, {type: "add", id:nanoid(), content: "Your agent has disconnected. We will try to find another agent for you.", user:"System", role:"assistant", userType: UserType.AGENT});
-        console.log(`Re-enqueuing customer ${customerToNotify} after agent ${userId} disconnected.`);
-        this.enqueueCustomer(customerToNotify); // Re-queue the customer
-        this.assignAgentIfPossible(); // Try to find a new agent
+
+      if (customerToNotifyConnectionId) {
+        console.log(`Chat DO: Agent ${agentNanoId} disconnected from active conversation with customer ${customerToNotifyConnectionId}.`);
+        this.activeConversations.delete(customerToNotifyConnectionId);
+        this.sendToConnection(customerToNotifyConnectionId, {type: "add", id:nanoid(), content: "Your agent has disconnected. We will try to find another agent for you.", user:"System", role:"assistant", userType: UserType.AGENT});
+        console.log(`Chat DO: Re-enqueuing customer ${customerToNotifyConnectionId} after agent ${agentNanoId} disconnected.`);
+        this.enqueueCustomer(customerToNotifyConnectionId);
+        this.assignAgentIfPossible();
       }
-    } else { // Customer disconnected
-      const wasInQueue = this.customerQueue.includes(userId);
+    } else { // Customer disconnected (or agent whose state wasn't properly set)
+      console.log(`Chat DO: Customer ${disconnectedUserId} disconnected.`);
+      const wasInQueue = this.customerQueue.includes(disconnectedUserId);
       if (wasInQueue) {
-        console.log(`Customer ${userId} was in queue. Removing. Before: customerQueue = [${this.customerQueue.join(", ")}]`);
-        this.customerQueue = this.customerQueue.filter((id) => id !== userId);
-        console.log(`After: customerQueue = [${this.customerQueue.join(", ")}]`);
-        // No need to update other queue positions here as they are only informed on dequeue or new enqueue.
+        console.log(`Chat DO: Customer ${disconnectedUserId} was in queue. Removing. Before: customerQueue = [${this.customerQueue.join(", ")}]`);
+        this.customerQueue = this.customerQueue.filter((id) => id !== disconnectedUserId);
+        console.log(`Chat DO: After: customerQueue = [${this.customerQueue.join(", ")}]`);
       }
 
-      // If customer was in an active conversation, notify the agent and make the agent available
-      let agentToNotify: string | null = null;
-      if (this.activeConversations.has(userId)) {
-        agentToNotify = this.activeConversations.get(userId)!;
-        this.activeConversations.delete(userId);
-        console.log(`Customer ${userId} disconnected from active conversation with agent ${agentToNotify}.`);
-        this.sendToConnection(agentToNotify, {type: "add", id:nanoid(), content: "The customer has disconnected.", user:"System", role:"assistant", userType: UserType.AGENT});
-        this.makeAgentAvailable(agentToNotify);
+      let agentToMakeAvailableNanoId: string | null = null;
+      if (this.activeConversations.has(disconnectedUserId)) {
+        agentToMakeAvailableNanoId = this.activeConversations.get(disconnectedUserId)!; // This is agent's nanoid
+        this.activeConversations.delete(disconnectedUserId);
+        console.log(`Chat DO: Customer ${disconnectedUserId} disconnected from active conversation with agent ${agentToMakeAvailableNanoId}.`);
+        // Need a way to send to agent by their nanoid if their connection is still active
+        this.sendToConnection(agentToMakeAvailableNanoId, {type: "add", id:nanoid(), content: "The customer has disconnected.", user:"System", role:"assistant", userType: UserType.AGENT});
+        this.makeAgentAvailable(agentToMakeAvailableNanoId);
       }
     }
   }
@@ -307,11 +351,45 @@ export class Chat extends Server<Env> {
 import { nanoid } from "nanoid";
 import { UserType } from "../shared";
 
+const MASTER_ADMIN_KEY = "adminayi888"; // As specified in the subtask
+
+function isAdminRequest(request: Request): boolean {
+  const url = new URL(request.url);
+  return url.pathname.startsWith("/admin");
+}
+
+function isValidAdminKey(request: Request): boolean {
+  return request.headers.get("X-Admin-Key") === MASTER_ADMIN_KEY;
+}
+
 export default {
-  async fetch(request, env) {
-    return (
-      (await routePartykitRequest(request, { ...env })) ||
-      env.ASSETS.fetch(request)
-    );
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    if (isAdminRequest(request)) {
+      console.log("Admin request detected for path:", new URL(request.url).pathname);
+      if (!isValidAdminKey(request)) {
+        console.log("Admin request REJECTED: Missing or invalid X-Admin-Key header.");
+        return new Response("Unauthorized: Missing or invalid admin key", { status: 401 });
+      }
+      console.log("Admin request AUTHORIZED: X-Admin-Key is valid.");
+
+      // Conceptual: Get AdminStateDO stub
+      try {
+        const doId = env.ADMIN_STATE_DO.idFromName("admin_singleton_id");
+        const stub = env.ADMIN_STATE_DO.get(doId);
+        console.log("AdminStateDO stub obtained successfully. Forwarding request to DO...");
+        // Forward the original request (or a new one with relevant parts) to the DO
+        return await stub.fetch(request);
+      } catch (e: any) {
+        console.error("Error obtaining or fetching from AdminStateDO stub:", e.message);
+        return new Response("Error processing admin request.", { status: 500 });
+      }
+    }
+
+    // Non-admin requests are handled by PartyKit or asset serving
+    const partykitResponse = await routePartykitRequest(request, { ...env, ctx } as any);
+    if (partykitResponse) {
+      return partykitResponse;
+    }
+    return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler<Env>;
