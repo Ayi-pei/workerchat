@@ -353,43 +353,87 @@ import { UserType } from "../shared";
 
 const MASTER_ADMIN_KEY = "adminayi888"; // As specified in the subtask
 
-function isAdminRequest(request: Request): boolean {
-  const url = new URL(request.url);
-  return url.pathname.startsWith("/admin");
-}
+// isAdminRequest is no longer used directly in fetch, path is checked explicitly.
+// It can be kept for other potential uses or removed if no longer needed.
+// function isAdminApiRequest(request: Request): boolean {
+//   const url = new URL(request.url);
+//   return url.pathname.startsWith("/api/admin/");
+// }
 
 function isValidAdminKey(request: Request): boolean {
   return request.headers.get("X-Admin-Key") === MASTER_ADMIN_KEY;
 }
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    if (isAdminRequest(request)) {
-      console.log("Admin request detected for path:", new URL(request.url).pathname);
-      if (!isValidAdminKey(request)) {
-        console.log("Admin request REJECTED: Missing or invalid X-Admin-Key header.");
-        return new Response("Unauthorized: Missing or invalid admin key", { status: 401 });
-      }
-      console.log("Admin request AUTHORIZED: X-Admin-Key is valid.");
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
 
-      // Conceptual: Get AdminStateDO stub
+    // 1. Serve admin.html for /admin or /admin/* paths (excluding specific assets)
+    if (url.pathname === "/admin" || (url.pathname.startsWith("/admin/") && !url.pathname.match(/\.(js|css|ico|png|jpg|jpeg|gif|svg)$/i))) {
+      console.log(`Serving admin.html for SPA route: ${url.pathname}`);
+      try {
+        // Create a new request for admin.html to avoid modifying the original request's URL for ASSETS.fetch
+        const adminHtmlRequest = new Request(new URL("/admin.html", request.url).toString(), {
+          headers: request.headers,
+          method: "GET", // Ensure it's a GET request for the HTML file
+        });
+        const adminHtmlResponse = await env.ASSETS.fetch(adminHtmlRequest);
+        if (adminHtmlResponse.ok) {
+          return new Response(adminHtmlResponse.body, {
+            headers: { ...adminHtmlResponse.headers, 'Content-Type': 'text/html' }, // Ensure correct content type
+            status: adminHtmlResponse.status
+          });
+        } else {
+          console.error(`Failed to fetch admin.html, status: ${adminHtmlResponse.status}`);
+          return new Response("admin.html not found or error fetching asset", { status: adminHtmlResponse.status });
+        }
+      } catch (e: any) {
+        console.error(`Error fetching admin.html: ${e.message}`);
+        return new Response("Error serving admin dashboard.", { status: 500 });
+      }
+    }
+
+    // 2. Handle Admin API calls (e.g., /api/admin/*)
+    if (url.pathname.startsWith("/api/admin/")) {
+      console.log("Admin API request detected for path:", url.pathname);
+      if (!isValidAdminKey(request)) {
+        console.warn("Admin API request REJECTED: Missing or invalid X-Admin-Key header.");
+        return new Response("Unauthorized: Missing or invalid admin key for API", { status: 401 });
+      }
+      console.log("Admin API request AUTHORIZED: X-Admin-Key is valid.");
+
       try {
         const doId = env.ADMIN_STATE_DO.idFromName("admin_singleton_id");
         const stub = env.ADMIN_STATE_DO.get(doId);
-        console.log("AdminStateDO stub obtained successfully. Forwarding request to DO...");
-        // Forward the original request (or a new one with relevant parts) to the DO
-        return await stub.fetch(request);
+
+        // Create a new request for the DO, stripping /api prefix
+        const doUrl = new URL(request.url);
+        doUrl.pathname = doUrl.pathname.replace(/^\/api/, ""); // Changes /api/admin/foo -> /admin/foo
+
+        console.log(`Forwarding Admin API request to DO. Original path: ${url.pathname}, New path for DO: ${doUrl.pathname}`);
+        const doRequest = new Request(doUrl.toString(), request); // Pass original request's method, headers, body
+
+        return await stub.fetch(doRequest);
       } catch (e: any) {
-        console.error("Error obtaining or fetching from AdminStateDO stub:", e.message);
-        return new Response("Error processing admin request.", { status: 500 });
+        console.error("Error obtaining or fetching from AdminStateDO stub for API:", e.message);
+        return new Response("Error processing admin API request.", { status: 500 });
       }
     }
 
-    // Non-admin requests are handled by PartyKit or asset serving
-    const partykitResponse = await routePartykitRequest(request, { ...env, ctx } as any);
+    // 3. Existing PartyKit and asset serving logic for non-admin routes
+    // Ensure CHAT and USER bindings are correctly passed if they exist on env.
+    // The `as any` cast might hide type errors; ensure env structure matches PartyKit expectations.
+    const partykitEnv = { ...env } as any;
+    // delete partykitEnv.ADMIN_STATE_DO; // PartyKit server doesn't need AdminStateDO directly
+
+    console.log("Routing to PartyKit or ASSETS for path:", url.pathname);
+    const partykitResponse = await routePartykitRequest(request, partykitEnv, ctx);
     if (partykitResponse) {
       return partykitResponse;
     }
+
+    // Fallback to serving static assets from 'public' directory for any other request
+    console.log("Falling back to ASSETS.fetch for path:", url.pathname);
     return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler<Env>;
