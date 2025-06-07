@@ -112,8 +112,8 @@ export class Chat extends Server<Env> {
   assignAgentIfPossible() {
     console.log(`assignAgentIfPossible called. Queue length: ${this.customerQueue.length}, Available agents: ${this.availableAgents.length}`);
     if (this.customerQueue.length > 0 && this.availableAgents.length > 0) {
-      const customerId = this.dequeueCustomer(); 
-      const agentId = this.availableAgents.shift(); 
+      const customerId = this.dequeueCustomer();
+      const agentId = this.availableAgents.shift();
 
       if (customerId && agentId) {
         // Note: makeAgentUnavailable is called inside assignAgentIfPossible (which is fine, but we already shifted agent from availableAgents)
@@ -121,8 +121,8 @@ export class Chat extends Server<Env> {
         // this.makeAgentUnavailable(agentId); // This will filter them out if they are still in, or do nothing if already removed.
         // The current logic is: agent is removed from availableAgents by shift(), then makeAgentUnavailable called on them (which will find they are not in the list and log that).
         // This is okay, but could be streamlined. For now, preserving existing calls.
-        this.makeAgentUnavailable(agentId); 
-        
+        this.makeAgentUnavailable(agentId);
+
         this.activeConversations.set(customerId, agentId);
         console.log(`ASSIGNED: Agent ${agentId} to Customer ${customerId}. ActiveConvos: ${this.activeConversations.size}, AvailAgents: [${this.availableAgents.join(", ")}], CustQueue: [${this.customerQueue.join(", ")}]`);
 
@@ -138,11 +138,11 @@ export class Chat extends Server<Env> {
         console.log("assignAgentIfPossible: Could not assign. Customer or Agent ID missing after dequeue/shift.");
         if (customerId) {
           console.log(`Re-enqueuing customer ${customerId} due to missing agent.`);
-          this.enqueueCustomer(customerId); 
+          this.enqueueCustomer(customerId);
         }
         if (agentId) {
           console.log(`Making agent ${agentId} available again due to missing customer.`);
-          this.makeAgentAvailable(agentId); 
+          this.makeAgentAvailable(agentId);
         }
       }
     } else {
@@ -278,11 +278,11 @@ export class Chat extends Server<Env> {
       // These are ChatMessage with userType, id, content etc.
       // Ensure the message is saved
       this.saveMessage(parsed as ChatMessage); // Type assertion
-      
+
       // Broadcast the chat message to relevant parties (e.g., other user in conversation)
       // For now, simple broadcast. In a real app, target specific users.
       const chatMessage = parsed as ChatMessage;
-      const recipientId = this.activeConversations.get(connection.id) || 
+      const recipientId = this.activeConversations.get(connection.id) ||
                           Array.from(this.activeConversations.entries()).find(([, agentId]) => agentId === connection.id)?.[0];
 
       if (recipientId) {
