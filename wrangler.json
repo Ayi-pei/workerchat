@@ -21,6 +21,10 @@
       {
         "class_name": "Chat",
         "name": "Chat"
+      },
+      {
+        "name": "ADMIN_STATE_DO",
+        "class_name": "AdminStateDO"
       }
     ]
   },

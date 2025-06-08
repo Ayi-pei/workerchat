@@ -1,131 +1,51 @@
-import { createRoot } from "react-dom/client";
-import { usePartySocket } from "partysocket/react";
-import React, { useState } from "react";
-import {
-  BrowserRouter,
-  Routes,
-  Route,
-  Navigate,
-  useParams,
-} from "react-router";
-import { nanoid } from "nanoid";
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { nanoid } from 'nanoid';
+// The existing App component for customer chat
+import App from './App'; // Assuming App.tsx is in the same directory or path is correct
+import AgentLoginPage from './agent_console/AgentLoginPage';
+import AgentDashboardPage from './agent_console/AgentDashboardPage';
+import 'antd/dist/reset.css'; // Global Ant Design styles
+import '../admin_dashboard/AdminDashboard.css'; // Import shared admin/agent dashboard styles
 
-import { names, type ChatMessage, type Message } from "../shared";
+const rootElement = document.getElementById('root');
 
-function App() {
-  const [name] = useState(names[Math.floor(Math.random() * names.length)]);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const { room } = useParams();
+if (rootElement) {
+  const root = createRoot(rootElement);
+  root.render(
+    <React.StrictMode>
+      <BrowserRouter>
+        <Routes>
+          {/* Existing Customer Chat Routes */}
+          {/* Redirect root to a new customer chat room */}
+          <Route path="/" element={<Navigate to={`/chat/${nanoid(8)}`} replace />} />
+          {/* Customer chat room */}
+          <Route path="/chat/:room" element={<App />} />
 
-  const socket = usePartySocket({
-    party: "chat",
-    room,
-    onMessage: (evt) => {
-      const message = JSON.parse(evt.data as string) as Message;
-      if (message.type === "add") {
-        const foundIndex = messages.findIndex((m) => m.id === message.id);
-        if (foundIndex === -1) {
-          // probably someone else who added a message
-          setMessages((messages) => [
-            ...messages,
-            {
-              id: message.id,
-              content: message.content,
-              user: message.user,
-              role: message.role,
-            },
-          ]);
-        } else {
-          // this usually means we ourselves added a message
-          // and it was broadcasted back
-          // so let's replace the message with the new message
-          setMessages((messages) => {
-            return messages
-              .slice(0, foundIndex)
-              .concat({
-                id: message.id,
-                content: message.content,
-                user: message.user,
-                role: message.role,
-              })
-              .concat(messages.slice(foundIndex + 1));
-          });
-        }
-      } else if (message.type === "update") {
-        setMessages((messages) =>
-          messages.map((m) =>
-            m.id === message.id
-              ? {
-                  id: message.id,
-                  content: message.content,
-                  user: message.user,
-                  role: message.role,
-                }
-              : m,
-          ),
-        );
-      } else {
-        setMessages(message.messages);
-      }
-    },
-  });
+          {/* Legacy or direct agent chat link, if App handles it.
+              This might need re-evaluation based on how agents connect with keys.
+              For now, assuming this direct agent chat via App is separate from the new console.
+              If the new agent console is the ONLY way agents should interact, this route might be removed or changed.
+              The prompt for agent authentication in backend was: /<room_name>/agent/<agent_nanoid_key>
+              This route /chat/:room/agent does not fit that pattern for key-based auth directly in URL.
+              Let's keep it as is from previous state for now, assuming App.tsx handles its own logic.
+          */}
+          <Route path="/chat/:room/agent" element={<App />} />
 
-  return (
-    <div className="chat container">
-      {messages.map((message) => (
-        <div key={message.id} className="row message">
-          <div className="two columns user">{message.user}</div>
-          <div className="ten columns">{message.content}</div>
-        </div>
-      ))}
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const content = e.currentTarget.elements.namedItem(
-            "content",
-          ) as HTMLInputElement;
-          const chatMessage: ChatMessage = {
-            id: nanoid(8),
-            content: content.value,
-            user: name,
-            role: "user",
-          };
-          setMessages((messages) => [...messages, chatMessage]);
-          // we could broadcast the message here
+          {/* New Agent Console Routes */}
+          <Route path="/agent/login" element={<AgentLoginPage />} />
+          <Route path="/agent/dashboard" element={<AgentDashboardPage />} />
+          {/* Redirect /agent to /agent/login by default */}
+          <Route path="/agent" element={<Navigate to="/agent/login" replace />} />
 
-          socket.send(
-            JSON.stringify({
-              type: "add",
-              ...chatMessage,
-            } satisfies Message),
-          );
-
-          content.value = "";
-        }}
-      >
-        <input
-          type="text"
-          name="content"
-          className="ten columns my-input-text"
-          placeholder={`Hello ${name}! Type a message...`}
-          autoComplete="off"
-        />
-        <button type="submit" className="send-message two columns">
-          Send
-        </button>
-      </form>
-    </div>
+          {/* Fallback for any other unmatched routes within this SPA */}
+          {/* This will catch any /foo or /bar and send to a new customer chat room */}
+          <Route path="*" element={<Navigate to={`/chat/${nanoid(8)}`} replace />} />
+        </Routes>
+      </BrowserRouter>
+    </React.StrictMode>
   );
+} else {
+  console.error("Failed to find the root element. The Admin Dashboard will not be rendered.");
 }
-
-// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-createRoot(document.getElementById("root")!).render(
-  <BrowserRouter>
-    <Routes>
-      <Route path="/" element={<Navigate to={`/${nanoid()}`} />} />
-      <Route path="/:room" element={<App />} />
-      <Route path="*" element={<Navigate to="/" />} />
-    </Routes>
-  </BrowserRouter>,
-);
