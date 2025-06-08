@@ -70,3 +70,4 @@ body {
     padding: 12px 8px; /* Adjust padding for smaller screens */
   }
 }
+/* Removed Chat Message Styling from AdminDashboard.css as it's now in AgentConsole.css */

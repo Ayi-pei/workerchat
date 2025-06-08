@@ -1,0 +1,157 @@
+/* AgentDashboardPage.tsx specific styles */
+
+.agent-console-header-space .ant-space-item {
+    display: flex; /* Helps align avatar and text better */
+    align-items: center;
+}
+
+.header-agent-info .ant-avatar {
+  margin-right: 8px;
+}
+
+.header-agent-info .ant-typography { /* For Agent ID text */
+  color: rgba(255, 255, 255, 0.85) !important; /* Ensure high specificity if needed */
+}
+
+.conversation-sider .ant-list-item {
+  padding: 10px 16px; /* Adjust padding for list items */
+  border-left: 3px solid transparent;
+  transition: background-color 0.2s ease-in-out, border-left-color 0.2s ease-in-out;
+  margin: 0 !important; /* Override any default List.Item margin if needed for continuous feel */
+}
+
+.conversation-sider .ant-list-item:hover {
+  background-color: #f0f2f5; /* Hover effect */
+}
+
+.conversation-sider .ant-list-item.selected-conversation {
+  background-color: #e6f7ff !important; /* Use !important if AntD specificity is an issue */
+  border-left-color: #1890ff !important;
+}
+
+.conversation-sider .ant-list-item-meta-title .ant-typography {
+    max-width: 150px; /* Ensure name doesn't push timestamp too far */
+}
+
+
+/* Chat Message Styling (for Agent Console) */
+.chat-window-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%; /* Ensure it takes up space given by parent Content */
+}
+
+.chat-message-list-container {
+  flex-grow: 1; /* Takes available space */
+  overflow-y: auto;
+  padding: 10px 10px 0 10px; /* Add some padding, remove bottom for ref */
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  background-color: #ffffff; /* Ensure it has a background */
+}
+
+.chat-message-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.message-item-wrapper { /* Wrapper to help with alignment */
+  display: flex;
+  margin-bottom: 10px; /* Increased spacing between messages */
+}
+
+.message-item {
+  padding: 8px 12px;
+  border-radius: 16px; /* More rounded bubbles */
+  max-width: 75%; /* Slightly wider for more content */
+  word-wrap: break-word;
+  line-height: 1.4;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+.agent-message {
+  background-color: #007bff;
+  color: white;
+  margin-left: auto;
+  border-bottom-right-radius: 4px; /* "Tail" effect */
+}
+
+.customer-message {
+  background-color: #e9ecef; /* Slightly different grey */
+  color: #212529; /* Darker text for better contrast */
+  margin-right: auto;
+  border-bottom-left-radius: 4px; /* "Tail" effect */
+}
+
+.message-sender { /* Not currently used in JSX, but defined */
+  font-weight: bold;
+  font-size: 0.85em;
+  margin-bottom: 4px;
+  color: #555;
+}
+.agent-message .message-sender {
+    color: rgba(255,255,255,0.9);
+}
+
+
+.message-content p {
+  margin-bottom: 0;
+}
+
+.message-timestamp {
+  font-size: 0.7em; /* Smaller timestamp */
+  color: #adb5bd;
+  margin-top: 6px; /* More space above timestamp */
+  display: block;
+}
+
+.agent-message .message-timestamp {
+    color: #dee2e6; /* Lighter timestamp for dark background */
+    text-align: right;
+}
+.customer-message .message-timestamp {
+    text-align: right; /* Both right for consistency inside bubble */
+}
+
+/* Message Input Area */
+.message-input-area {
+  display: flex;
+  align-items: center;
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
+  flex-shrink: 0; /* Prevent input area from shrinking */
+}
+
+.message-input-area .ant-input-textarea-resizable {
+  margin-right: 10px;
+}
+
+.message-input-area .ant-btn {
+    height: auto; /* Allow button height to match textarea if it grows */
+    min-height: 32px; /* Ensure a minimum height */
+}
+
+/* Placeholder styling */
+.chat-placeholder {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100%; /* Fill the content area */
+    color: #aaa;
+}
+.chat-placeholder .anticon {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+/* Ensure AdminDashboard.css chat styles are not conflicting if imported globally */
+/* This file should ideally be the sole source for .agent-message, .customer-message etc. */
+/* If AdminDashboard.css also defines these, ensure they are namespaced or one is removed. */
+/* For now, assuming AdminDashboard.css's chat styles are removed or specific to admin */
+/* For this subtask, I will remove the chat styles from AdminDashboard.css */
+/* to avoid conflict and keep agent console styles self-contained here. */
