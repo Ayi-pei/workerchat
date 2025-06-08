@@ -37,6 +37,10 @@ body {
     margin-bottom: 0; /* Remove default bottom margin from Title if it's too much */
 }
 
+.key-management-header > .ant-col { /* Ensure direct children columns align middle if needed */
+    align-self: center;
+}
+
 
 /* Table action button styling */
 .ant-table-cell .ant-btn-link {
