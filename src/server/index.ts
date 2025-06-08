@@ -159,7 +159,7 @@ export class Chat extends Server<Env> {
   }
 
   async onConnect(connection: Connection) {
-    const-partykit ConnectionContext is not available here, using connection.request.url
+    // const-partykit ConnectionContext is not available here, using connection.request.url
     const url = new URL(connection.request.url);
     const pathSegments = url.pathname.split("/").filter(segment => segment.length > 0);
     // Example agent URL structure: ws://host/room_name/agent/agent_nanoid_key
